@@ -137,43 +137,48 @@ class PrintfulShipping extends ShippingMethodBase {
 
     if (!empty($request_data)) {
 
-      // Set API key if not default.
+      // Set API key and proceed only if the shipment has any integrated products
+      // (with proper store config it should have, also this should be caught).
       // @see Drupal\commerce_printful\Service\OrderIntegrator::createPrintfulOrder().
       if (!empty($request_data['_printful_store'])) {
         $this->pf->setConnectionInfo([
           'api_key' => $request_data['_printful_store']->get('apiKey'),
         ]);
         unset($request_data['_printful_store']);
-      }
 
-      try {
-        $result = $this->pf->shippingRates($request_data);
+        try {
+          $result = $this->pf->shippingRates($request_data);
 
-        foreach ($result['result'] as $printful_shipping_option) {
-          $price = new Price($printful_shipping_option['rate'], $printful_shipping_option['currency']);
+          foreach ($result['result'] as $printful_shipping_option) {
+            $price = new Price($printful_shipping_option['rate'], $printful_shipping_option['currency']);
 
-          // Support other currencies.
-          if ($this->shouldCurrencyRefresh($this->currentCurrency())) {
-            // If current currency does not match to shipment code.
-            if ($this->currentCurrency() !== $price->getCurrencyCode()) {
-              $price = $this->getPrice($price, $this->currentCurrency());
+            // Support other currencies.
+            if ($this->shouldCurrencyRefresh($this->currentCurrency())) {
+              // If current currency does not match to shipment code.
+              if ($this->currentCurrency() !== $price->getCurrencyCode()) {
+                $price = $this->getPrice($price, $this->currentCurrency());
+              }
             }
-          }
 
-          $service = new ShippingService($printful_shipping_option['id'], $printful_shipping_option['name']);
-          $rates[$printful_shipping_option['rate']] = new ShippingRate($printful_shipping_option['id'], $service, $price);
+            $service = new ShippingService($printful_shipping_option['id'], $printful_shipping_option['name']);
+            $rates[$printful_shipping_option['rate']] = new ShippingRate($printful_shipping_option['id'], $service, $price);
+          }
+          // Sort by price ASC.
+          ksort($rates);
         }
-        // Sort by price ASC.
-        ksort($rates);
+        catch (PrintfulException $e) {
+          $this->logger->error(
+            "Couldn't load shipping data. Error: @details",
+            [
+              '@details' => $e->getFullInfo(),
+            ]
+          );
+        }
       }
-      catch (PrintfulException $e) {
-        $this->logger->error(
-          "Couldn't load shipping data. Error: @details",
-          [
-            '@details' => $e->getFullInfo(),
-          ]
-        );
+      else {
+        $this->logger->error($this->t('Printful shipping method error: Trying to use Printful shipping method on non Printful items.', []));
       }
+
     }
 
     return $rates;
